@@ -1,0 +1,50 @@
+on: [push]
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@master
+    
+    - uses: azure/docker-login@v1
+      with:
+        login-server: unauthorizationdomain.azurecr.io
+        username: ${{ secrets.acr_unauthorizationdomain_username }}
+        password: ${{ secrets.acr_unauthorizationdomain_password }}
+    
+    - name: Build and push image to ACR
+      id: build-image
+      run: |
+        docker build "$GITHUB_WORKSPACE/Authorization" -f  "Authorization/Dockerfile" -t unauthorizationdomain.azurecr.io/unpensioncluster:${{ github.sha }} --label dockerfile-path=Authorization/Dockerfile
+        docker push unauthorizationdomain.azurecr.io/unpensioncluster:${{ github.sha }}
+    
+    - uses: azure/k8s-set-context@v1
+      with:
+         kubeconfig: ${{ secrets.aks_unpensioncluster_kubeConfig }}
+      id: login
+    
+    - name: Create namespace
+      run: |
+        namespacePresent=`kubectl get namespace | grep unpensionclustera45c | wc -l`
+        if [ $namespacePresent -eq 0 ]
+        then
+            echo `kubectl create namespace unpensionclustera45c`
+        fi
+
+    - uses: azure/k8s-create-secret@v1
+      with:
+        namespace: unpensionclustera45c
+        container-registry-url: unauthorizationdomain.azurecr.io
+        container-registry-username: ${{ secrets.acr_unauthorizationdomain_username }}
+        container-registry-password: ${{ secrets.acr_unauthorizationdomain_password }}
+        secret-name: unpensioncludockerauth
+       
+    - uses: azure/k8s-deploy@v1.2
+      with:
+        namespace: unpensionclustera45c
+        manifests: |
+          manifests/deployment.yml
+          manifests/service.yml
+        images: |
+          unauthorizationdomain.azurecr.io/unpensioncluster:${{ github.sha }}
+        imagepullsecrets: |
+          unpensioncludockerauth
